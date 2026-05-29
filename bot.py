@@ -571,4 +571,9 @@ def main():
     app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.error(f"❌ CRITICAL BOT CRASH: {e}", exc_info=True)
+        import sys
+        sys.exit(1)
