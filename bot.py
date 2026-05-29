@@ -8,7 +8,16 @@ import logging
 import sqlite3
 import requests
 import re
+import sys
 from datetime import datetime
+
+# Setup logging IMMEDIATELY
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
@@ -24,16 +33,6 @@ from database import (
 )
 from tron_utils import monitor_incoming_usdt, verify_transaction, get_usdt_balance, verify_usdt_deposit, send_usdt
 from responses import get_text
-
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-# Initialize database
-init_db()
 
 # Conversation states
 (
