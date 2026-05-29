@@ -1,0 +1,25 @@
+services:
+  - type: worker
+    name: cryptoswap-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: ./start.sh
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.0
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: YOUR_BANK_NAME
+        sync: false
+      - key: YOUR_BANK_ACCOUNT
+        sync: false
+      - key: YOUR_BANK_ACCOUNT_NAME
+        sync: false
+      - key: YOUR_USDT_WALLET
+        sync: false
+    disk:
+      name: bot-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
