@@ -29,7 +29,7 @@ from config import BOT_TOKEN, ADMIN_IDS, YOUR_BANK_NAME, YOUR_BANK_ACCOUNT, YOUR
 from database import (
     init_db, get_user, register_user, update_balance, add_transaction,
     update_transaction_status, get_setting, set_setting, get_user_transactions,
-    get_transaction, get_all_users, auto_create_user, DB_PATH
+    get_transaction, get_all_users, auto_create_user
 )
 from tron_utils import monitor_incoming_usdt, verify_transaction, get_usdt_balance, verify_usdt_deposit, send_usdt
 from responses import get_text
