@@ -1,86 +1,53 @@
-import sqlite3
-import json
 import os
+from supabase import create_client, Client
+from config import SUPABASE_URL, SUPABASE_KEY
 
-# Use /data folder for Render Persistent Disk, fallback to current dir for local dev
-DB_DIR = "data"
-if not os.path.exists(DB_DIR):
-    os.makedirs(DB_DIR)
-DB_PATH = os.path.join(DB_DIR, "exchange.db")
+# Initialize Supabase client
+# If these are missing, the bot will fail at startup - which is better for debugging
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in .env")
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def init_db():
-    """Initialize the database with required tables"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    
-    # Users table
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY,
-        phone TEXT,
-        bank_name TEXT,
-        bank_account_name TEXT,
-        bank_account_number TEXT,
-        crypto_address TEXT,
-        naira_balance INTEGER DEFAULT 0,
-        usdt_balance REAL DEFAULT 0,
-        registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )''')
-    
-    # Transactions table
-    c.execute('''CREATE TABLE IF NOT EXISTS transactions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        type TEXT,  -- 'sell', 'buy', 'withdraw_naira', 'withdraw_crypto', 'deposit'
-        amount_currency TEXT,  -- 'USDT', 'NGN'
-        amount REAL,
-        rate REAL,
-        status TEXT,  -- 'pending', 'completed', 'failed'
-        tx_hash TEXT,
-        details TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )''')
-    
-    # Settings table (for rates)
-    c.execute('''CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT
-    )''')
-    
-    # Migration: Add details column to transactions if it doesn't exist
-    try:
-        c.execute("ALTER TABLE transactions ADD COLUMN details TEXT")
-    except sqlite3.OperationalError:
-        # Column already exists
-        pass
-    
+    """
+    In Supabase, we don't 'init' tables via code usually (handled in dashboard).
+    However, we ensure default settings exist.
+    """
     # Insert default rates if not exist
-    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('buy_rate', '1480')")
-    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('sell_rate', '1520')")
-    conn.commit()
-    conn.close()
+    set_setting_if_not_exists('buy_rate', '1480')
+    set_setting_if_not_exists('sell_rate', '1520')
+
+def set_setting_if_not_exists(key, value):
+    """Helper to set default if not present"""
+    existing = get_setting(key)
+    if existing is None:
+        set_setting(key, value)
 
 def get_user(user_id):
     """Retrieve user details by ID"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-    user = c.fetchone()
-    conn.close()
-    if user:
-        columns = ['user_id', 'phone', 'bank_name', 'bank_account_name', 'bank_account_number', 'crypto_address', 'naira_balance', 'usdt_balance', 'registered_at']
-        return dict(zip(columns, user))
+    try:
+        response = supabase.table('users').select('*').eq('user_id', user_id).execute()
+        if response.data:
+            return response.data[0]
+    except Exception as e:
+        print(f"Supabase error get_user: {e}")
     return None
 
 def register_user(user_id, phone, bank_name, bank_account_name, bank_account_number, crypto_address):
     """Register a new user or update existing"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''INSERT OR REPLACE INTO users 
-        (user_id, phone, bank_name, bank_account_name, bank_account_number, crypto_address)
-        VALUES (?, ?, ?, ?, ?, ?)''',
-        (user_id, phone, bank_name, bank_account_name, bank_account_number, crypto_address))
-    conn.commit()
-    conn.close()
+    data = {
+        'user_id': user_id,
+        'phone': phone,
+        'bank_name': bank_name,
+        'bank_account_name': bank_account_name,
+        'bank_account_number': bank_account_number,
+        'crypto_address': crypto_address
+    }
+    try:
+        supabase.table('users').upsert(data).execute()
+    except Exception as e:
+        print(f"Supabase error register_user: {e}")
 
 def auto_create_user(user_id):
     """Ensure user exists in DB, create with defaults if not"""
@@ -91,78 +58,98 @@ def auto_create_user(user_id):
     return user
 
 def update_balance(user_id, naira_delta=0, usdt_delta=0):
-    """Update user's Naira and/or USDT balance"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("UPDATE users SET naira_balance = naira_balance + ?, usdt_balance = usdt_balance + ? WHERE user_id = ?",
-              (naira_delta, usdt_delta, user_id))
-    conn.commit()
-    conn.close()
+    """
+    Update user's balance. 
+    Note: For P2P refactor, this is mostly unused but kept for compatibility.
+    In Postgres, we use RPC or atomic increments if possible.
+    """
+    user = get_user(user_id)
+    if not user: return
+    
+    new_naira = (user.get('naira_balance') or 0) + naira_delta
+    new_usdt = (user.get('usdt_balance') or 0) + usdt_delta
+    
+    try:
+        supabase.table('users').update({
+            'naira_balance': new_naira,
+            'usdt_balance': new_usdt
+        }).eq('user_id', user_id).execute()
+    except Exception as e:
+        print(f"Supabase error update_balance: {e}")
 
 def add_transaction(user_id, tx_type, amount_currency, amount, rate, status, tx_hash=None, details=None):
     """Add a new transaction record"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''INSERT INTO transactions (user_id, type, amount_currency, amount, rate, status, tx_hash, details)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-              (user_id, tx_type, amount_currency, amount, rate, status, tx_hash, details))
-    conn.commit()
-    tx_id = c.lastrowid
-    conn.close()
-    return tx_id
+    data = {
+        'user_id': user_id,
+        'type': tx_type,
+        'amount_currency': amount_currency,
+        'amount': amount,
+        'rate': rate,
+        'status': status,
+        'tx_hash': tx_hash,
+        'details': details
+    }
+    try:
+        response = supabase.table('transactions').insert(data).execute()
+        if response.data:
+            return response.data[0]['id']
+    except Exception as e:
+        print(f"Supabase error add_transaction: {e}")
+    return None
 
 def update_transaction_status(tx_id, status):
-    """Update transaction status (pending -> completed, etc.)"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("UPDATE transactions SET status = ? WHERE id = ?", (status, tx_id))
-    conn.commit()
-    conn.close()
+    """Update transaction status"""
+    try:
+        supabase.table('transactions').update({'status': status}).eq('id', tx_id).execute()
+    except Exception as e:
+        print(f"Supabase error update_transaction_status: {e}")
 
 def get_transaction(tx_id):
     """Retrieve transaction details"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT * FROM transactions WHERE id = ?", (tx_id,))
-    tx = c.fetchone()
-    conn.close()
-    if tx:
-        columns = ['id', 'user_id', 'type', 'amount_currency', 'amount', 'rate', 'status', 'tx_hash', 'details', 'created_at']
-        return dict(zip(columns, tx))
+    try:
+        response = supabase.table('transactions').select('*').eq('id', tx_id).execute()
+        if response.data:
+            return response.data[0]
+    except Exception as e:
+        print(f"Supabase error get_transaction: {e}")
     return None
 
 def get_user_transactions(user_id, limit=10):
     """Get user's transaction history"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT * FROM transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?", (user_id, limit))
-    txs = c.fetchall()
-    conn.close()
-    columns = ['id', 'user_id', 'type', 'amount_currency', 'amount', 'rate', 'status', 'tx_hash', 'created_at']
-    return [dict(zip(columns, tx)) for tx in txs]
+    try:
+        response = supabase.table('transactions')\
+            .select('*')\
+            .eq('user_id', user_id)\
+            .order('created_at', desc=True)\
+            .limit(limit)\
+            .execute()
+        return response.data
+    except Exception as e:
+        print(f"Supabase error get_user_transactions: {e}")
+    return []
 
 def get_setting(key):
     """Retrieve a setting value"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT value FROM settings WHERE key = ?", (key,))
-    row = c.fetchone()
-    conn.close()
-    return row[0] if row else None
+    try:
+        response = supabase.table('settings').select('value').eq('key', key).execute()
+        if response.data:
+            return response.data[0]['value']
+    except Exception as e:
+        print(f"Supabase error get_setting: {e}")
+    return None
 
 def set_setting(key, value):
     """Set or update a setting"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
-    conn.commit()
-    conn.close()
+    try:
+        supabase.table('settings').upsert({'key': key, 'value': str(value)}).execute()
+    except Exception as e:
+        print(f"Supabase error set_setting: {e}")
 
 def get_all_users():
-    """Get all registered users (for broadcasting, etc.)"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT user_id FROM users")
-    users = c.fetchall()
-    conn.close()
-    return [user[0] for user in users]
+    """Get all registered user IDs"""
+    try:
+        response = supabase.table('users').select('user_id').execute()
+        return [row['user_id'] for row in response.data]
+    except Exception as e:
+        print(f"Supabase error get_all_users: {e}")
+    return []

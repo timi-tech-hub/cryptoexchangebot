@@ -6,6 +6,10 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")  # From @BotFather
 ADMIN_IDS = [int(os.getenv("ADMIN_ID"))]  # Your Telegram user ID
 
+# Supabase
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
 # TronGrid API (free)
 TRONGRID_API_KEY = os.getenv("TRONGRID_API_KEY")
 YOUR_USDT_WALLET = os.getenv("YOUR_USDT_WALLET", "TYourWalletAddressHere")  # Address where users send USDT
