@@ -514,7 +514,7 @@ def main():
     buy_conv = ConversationHandler(
         entry_points=[
             CommandHandler("buy", buy_start),
-            MessageHandler(filters.Regex(r'^(?i)buy'), buy_start)
+            MessageHandler(filters.Regex(r'(?i)^buy'), buy_start)
         ],
         states={
             BUY_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, buy_amount)],
@@ -522,13 +522,13 @@ def main():
             BUY_CONFIRM_WALLET: [MessageHandler(filters.TEXT & ~filters.COMMAND, buy_confirm_wallet)],
             BUY_PAYMENT_PROOF: [MessageHandler(filters.PHOTO | filters.Document.ALL | filters.TEXT, buy_payment_proof)],
         },
-        fallbacks=[CommandHandler("cancel", cancel_trade), MessageHandler(filters.Regex(r'^(?i)cancel'), cancel_trade)],
+        fallbacks=[CommandHandler("cancel", cancel_trade), MessageHandler(filters.Regex(r'(?i)^cancel'), cancel_trade)],
     )
     
     sell_conv = ConversationHandler(
         entry_points=[
             CommandHandler("sell", sell_start),
-            MessageHandler(filters.Regex(r'^(?i)sell'), sell_start)
+            MessageHandler(filters.Regex(r'(?i)^sell'), sell_start)
         ],
         states={
             SELL_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sell_amount)],
@@ -536,7 +536,7 @@ def main():
             SELL_CONFIRM_ACC: [MessageHandler(filters.TEXT & ~filters.COMMAND, sell_confirm_acc)],
             SELL_TX_HASH: [MessageHandler(filters.TEXT & ~filters.COMMAND, sell_tx_hash)],
         },
-        fallbacks=[CommandHandler("cancel", cancel_trade), MessageHandler(filters.Regex(r'^(?i)cancel'), cancel_trade)],
+        fallbacks=[CommandHandler("cancel", cancel_trade), MessageHandler(filters.Regex(r'(?i)^cancel'), cancel_trade)],
     )
     
     # Register handlers
@@ -545,13 +545,13 @@ def main():
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("rates", rates))
-    app.add_handler(MessageHandler(filters.Regex(r'^(?i)(rate|price)'), rates))
+    app.add_handler(MessageHandler(filters.Regex(r'(?i)^(rate|price)'), rates))
     
     app.add_handler(CommandHandler("history", history))
-    app.add_handler(MessageHandler(filters.Regex(r'^(?i)(history|order|transaction)'), history))
+    app.add_handler(MessageHandler(filters.Regex(r'(?i)^(history|order|transaction)'), history))
     
     app.add_handler(CommandHandler("support", support))
-    app.add_handler(MessageHandler(filters.Regex(r'^(?i)(support|help|admin)'), support))
+    app.add_handler(MessageHandler(filters.Regex(r'(?i)^(support|help|admin)'), support))
     
     # Admin commands
     app.add_handler(CommandHandler("setrate", setrate))
