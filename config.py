@@ -1,55 +1,109 @@
 """
 Configuration module for the Nigerian P2P Crypto Exchange Bot.
-Handles environment variable loading and provides a centralized settings interface.
+
+This module handles environment variable loading and provides a centralized settings interface
+for Telegram, Supabase (database), blockchain (TRON), and merchant bank details.
+
+Environment variables should be defined in a .env file or through the hosting provider's
+configuration panel. See .env.example for required variables.
 """
 
 import os
 from typing import List, Optional
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# Load environment variables from .env file (optional if using hosting provider config)
 load_dotenv()
+
 
 def get_env(key: str, default: Optional[str] = None, required: bool = False) -> str:
     """
-    Safely retrieve an environment variable.
-    
+    Safely retrieve an environment variable with optional default value.
+
     Args:
-        key: The environment variable key.
-        default: The default value if the key is not found.
-        required: If True, prints an error message if the key is missing.
-        
+        key: The environment variable key to retrieve.
+        default: Default value if the key is not found. Defaults to None.
+        required: If True, prints a warning if the key is missing. Defaults to False.
+
     Returns:
-        The value of the environment variable or the default.
+        str: The environment variable value or the default value.
+
+    Note:
+        Logging may not be initialized at config load time, so print() is used for warnings.
     """
-    val = os.getenv(key, default)
-    if required and not val:
-        # Using print here as logging might not be initialized yet in all entry points
-        print(f"❌ CRITICAL CONFIG ERROR: Missing required environment variable: {key}")
-    return val or ""
+    value = os.getenv(key, default)
+    if required and not value:
+        print(f"⚠️  CONFIG WARNING: Missing environment variable: {key}")
+    return value or ""
 
-# --- Telegram Configuration ---
+
+# ============================================================================
+# TELEGRAM CONFIGURATION
+# ============================================================================
+
 BOT_TOKEN: str = get_env("BOT_TOKEN", required=True)
+"""Telegram bot API token from BotFather. Required."""
+
 ADMIN_ID_RAW: str = get_env("ADMIN_ID", required=True)
-ADMIN_IDS: List[int] = [int(ADMIN_ID_RAW)] if ADMIN_ID_RAW and ADMIN_ID_RAW.isdigit() else []
+"""Raw admin user ID(s) from environment variable."""
 
-# --- Supabase Configuration (Database) ---
+ADMIN_IDS: List[int] = (
+    [int(ADMIN_ID_RAW)] if ADMIN_ID_RAW and ADMIN_ID_RAW.isdigit() else []
+)
+"""List of admin user IDs with elevated permissions."""
+
+
+# ============================================================================
+# SUPABASE CONFIGURATION (Database)
+# ============================================================================
+
 SUPABASE_URL: str = get_env("SUPABASE_URL", required=True)
+"""Supabase project URL for database connection."""
+
 SUPABASE_KEY: str = get_env("SUPABASE_KEY", required=True)
+"""Supabase API key (service or anon key)."""
 
-# --- Tron/Blockchain Configuration ---
-TRONGRID_API_KEY: str = get_env("TRONGRID_API_KEY")
+
+# ============================================================================
+# BLOCKCHAIN CONFIGURATION (TRON Network)
+# ============================================================================
+
+TRONGRID_API_KEY: str = get_env("TRONGRID_API_KEY", "")
+"""TronGrid API key for blockchain queries. Optional but recommended."""
+
 YOUR_USDT_WALLET: str = get_env("YOUR_USDT_WALLET", "TYourWalletAddressHere")
+"""Merchant's TRC20 USDT wallet address for receiving customer payments."""
 
-# --- Merchant Bank Details ---
+
+# ============================================================================
+# MERCHANT BANK DETAILS (NGN Settlement)
+# ============================================================================
+
 YOUR_BANK_NAME: str = get_env("YOUR_BANK_NAME", "Moniepoint Microfinance Bank")
-YOUR_BANK_ACCOUNT: str = get_env("YOUR_BANK_ACCOUNT", "6541330333")
-YOUR_BANK_ACCOUNT_NAME: str = get_env("YOUR_BANK_ACCOUNT_NAME", "GraceApp Nigeria-mas")
+"""Name of the bank for NGN transfers to users."""
 
-# --- Trading Parameters ---
-DEFAULT_BUY_RATE: int = 1480  # Default if not set in DB
-DEFAULT_SELL_RATE: int = 1520 # Default if not set in DB
+YOUR_BANK_ACCOUNT: str = get_env("YOUR_BANK_ACCOUNT", "0000000000")
+"""10-digit bank account number for merchant."""
 
-# --- Optional Integrations ---
+YOUR_BANK_ACCOUNT_NAME: str = get_env("YOUR_BANK_ACCOUNT_NAME", "Business Account")
+"""Account holder name displayed to customers."""
+
+
+# ============================================================================
+# TRADING PARAMETERS (Default Exchange Rates)
+# ============================================================================
+
+DEFAULT_BUY_RATE: int = 1480
+"""Default rate (NGN per USDT) when users buy USDT from the bot."""
+
+DEFAULT_SELL_RATE: int = 1520
+"""Default rate (NGN per USDT) when users sell USDT to the bot."""
+
+
+# ============================================================================
+# OPTIONAL INTEGRATIONS
+# ============================================================================
+
 PAYSTACK_SECRET_KEY: str = get_env("PAYSTACK_SECRET_KEY", "")
+"""Paystack API secret key for payment verification. Optional."""
 

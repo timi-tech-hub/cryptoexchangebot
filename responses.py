@@ -1,6 +1,27 @@
-import random
+"""
+Response library for the Nigerian P2P Crypto Exchange Bot.
 
-RESPONSES = {
+This module contains 200+ localized response variations in Nigerian Pidgin English,
+designed to make the bot feel like trading with a real person rather than an automated service.
+
+Organization:
+    - Welcome & navigation responses
+    - Exchange rate displays
+    - Buy conversation flow responses
+    - Sell conversation flow responses
+    - Error & validation messages
+    - Admin notification templates
+    - User notification messages
+"""
+
+import random
+from typing import List, Dict, Any
+
+# ============================================================================
+# RESPONSE LIBRARY
+# ============================================================================
+
+RESPONSES: Dict[str, List[str]] = {
     "WELCOME": [
         "How far! 🏦 Welcome to the P2P Exchange. Ready to trade some USDT? Just type 'buy' or 'sell' make we start!",
         "Hello boss! 👋 Your P2P plug is here. You wan swap Naira for USDT or USDT for Naira? I dey ready.",
@@ -279,10 +300,37 @@ RESPONSES = {
     ]
 }
 
-def get_text(key, **kwargs):
-    """Get a random variation of a response text"""
+
+def get_text(key: str, **kwargs: Any) -> str:
+    """
+    Retrieve a random response text variation from the response library.
+
+    This function selects a random variation from the response templates,
+    allowing each user interaction to feel fresh and human-like rather than robotic.
+
+    Args:
+        key: The response category key (e.g., "WELCOME", "BUY_START").
+        **kwargs: Placeholder values to format into the response text.
+                 Examples: amount=100, naira=1500000, tx_id=12345
+
+    Returns:
+        str: A formatted response string with placeholders replaced.
+             If key not found, returns an error message.
+
+    Example:
+        >>> get_text("BUY_START")
+        "Sharp! 🛒 How much USDT you wan buy today?"
+
+        >>> get_text("BUY_AMOUNT_SUCCESS", amount=50)
+        "Got it! 50 USDT. ✅ Now, where I go send am?"
+
+    Note:
+        - All variations are in Nigerian Pidgin English for authentic communication
+        - Responses include emoji for visual appeal
+        - Each key has 10+ variations to prevent repetition
+    """
     if key not in RESPONSES:
-        return f"Error: Key {key} not found."
-    
+        return f"Error: Response key '{key}' not found in library."
+
     text = random.choice(RESPONSES[key])
     return text.format(**kwargs)
