@@ -97,6 +97,19 @@ Configure the following variables in your hosting provider (Render/Koyeb) or loc
 - **Build Command**: `pip install -r requirements.txt`
 - **Start Command**: `python bot.py`
 
+### 4. Security Provisioning (Recommended)
+Paste this into the Supabase SQL Editor after creating tables to lock down your data:
+
+```sql
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Bot full access" ON users FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "Bot full access" ON transactions FOR ALL TO service_role USING (true) WITH CHECK (true);
+CREATE POLICY "Bot full access" ON settings FOR ALL TO service_role USING (true) WITH CHECK (true);
+```
+
 ---
 
 ## 👨‍💼 Administration
