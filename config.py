@@ -3,25 +3,29 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # From @BotFather
-ADMIN_IDS = [int(os.getenv("ADMIN_ID"))]  # Your Telegram user ID
+def get_env(key, default=None, required=False):
+    val = os.getenv(key, default)
+    if required and not val:
+        print(f"❌ ERROR: Missing required environment variable: {key}")
+    return val
+
+BOT_TOKEN = get_env("BOT_TOKEN", required=True)
+ADMIN_ID_RAW = get_env("ADMIN_ID", required=True)
+ADMIN_IDS = [int(ADMIN_ID_RAW)] if ADMIN_ID_RAW and ADMIN_ID_RAW.isdigit() else []
 
 # Supabase
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_URL = get_env("SUPABASE_URL", required=True)
+SUPABASE_KEY = get_env("SUPABASE_KEY", required=True)
 
-# TronGrid API (free)
-TRONGRID_API_KEY = os.getenv("TRONGRID_API_KEY")
-YOUR_USDT_WALLET = os.getenv("YOUR_USDT_WALLET", "TYourWalletAddressHere")  # Address where users send USDT
+# TronGrid API
+TRONGRID_API_KEY = get_env("TRONGRID_API_KEY")
+YOUR_USDT_WALLET = get_env("YOUR_USDT_WALLET", "TYourWalletAddressHere")
 
-# Exchange rates (default, admin can change)
-DEFAULT_BUY_RATE = 1480   # You buy USDT from user at ₦1480 per USDT
-DEFAULT_SELL_RATE = 1520  # You sell USDT to user at ₦1520 per USDT
+# Bank details
+YOUR_BANK_NAME = get_env("YOUR_BANK_NAME", "Moniepoint Microfinance Bank")
+YOUR_BANK_ACCOUNT = get_env("YOUR_BANK_ACCOUNT", "6541330333")
+YOUR_BANK_ACCOUNT_NAME = get_env("YOUR_BANK_ACCOUNT_NAME", "GraceApp Nigeria-mas")
 
-# Bank details for user deposits (displayed to users)
-YOUR_BANK_NAME = "Moniepoint Microfinance Bank"
-YOUR_BANK_ACCOUNT = "6541330333"
-YOUR_BANK_ACCOUNT_NAME = "GraceApp Nigeria-mas"
-
-# Optional: Real bank API (Paystack/Monnify) - leave empty for manual/admin confirmation
-PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY", "")
+DEFAULT_BUY_RATE = 1480
+DEFAULT_SELL_RATE = 1520
+PAYSTACK_SECRET_KEY = get_env("PAYSTACK_SECRET_KEY", "")

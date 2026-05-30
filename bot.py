@@ -332,38 +332,56 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text("❌ Transaction not found.")
         return
         
-    if tx['status'] != 'pending':
-        await query.edit_message_text(f"❌ Transaction already {tx['status']}.")
+    # If already completed, ignore everything to avoid multiple messages
+    if tx['status'] == 'completed':
+        await query.answer("This order is already COMPLETED.", show_alert=True)
         return
         
     tx_user_id = tx['user_id']
     
     if action == 'approve':
+        # Mark as completed in DB
         update_transaction_status(tx_id, 'completed')
+        
+        # Update admin message (REMOVE BUTTONS)
         await query.edit_message_text(f"✅ Order #{tx_id} marked as COMPLETED.")
         
+        # Notify user with approval message (Pidgin)
         try:
             await context.bot.send_message(
                 chat_id=tx_user_id,
-                text=f"✅ *Order #{tx_id} Completed!*\n\n"
-                     f"Your trade has been verified and processed. Thank you for trading with us!",
+                text=get_text("ADMIN_APPROVE_USER", tx_id=tx_id),
                 parse_mode="Markdown"
             )
-        except TelegramError:
+        except Exception:
             pass
             
     elif action == 'reject':
+        # If already rejected, ignore to avoid multiple messages
+        if tx['status'] == 'failed':
+            await query.answer("This order is already REJECTED.", show_alert=True)
+            return
+            
+        # Mark as failed in DB
         update_transaction_status(tx_id, 'failed')
-        await query.edit_message_text(f"❌ Order #{tx_id} REJECTED.")
         
+        # Update admin message (KEEP APPROVE BUTTON in case money shows up later)
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Approved (Money don show)", callback_data=f"admin_approve_{tx_id}")]
+        ])
+        await query.edit_message_text(
+            f"❌ Order #{tx_id} REJECTED (Money never show).\n\nYou can still Approve if it enters later.",
+            reply_markup=keyboard
+        )
+        
+        # Notify user with rejection message (Pidgin)
         try:
             await context.bot.send_message(
                 chat_id=tx_user_id,
-                text=f"❌ *Order #{tx_id} Rejected*\n\n"
-                     f"Your transaction was not verified or contains errors. Please contact support.",
+                text=get_text("ADMIN_REJECT_USER", tx_id=tx_id),
                 parse_mode="Markdown"
             )
-        except TelegramError:
+        except Exception:
             pass
 
 # ============================================================================

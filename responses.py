@@ -252,6 +252,30 @@ RESPONSES = {
         "Hello! 😊 Just small reminder say you fit buy or sell USDT right here, sharp sharp. 🏦 No accounts needed!",
         "Hi! 📈 Crypto market dey move o! Just reminding you say we dey here for all your USDT/Naira needs. 👋",
         "How far! 👋 E don tey. Just letting you know say we still dey process trades fast and secure. 🚀 Ready when you are!"
+    ],
+    "ADMIN_APPROVE_USER": [
+        "✅ *Order #{tx_id} Done!* \n\nI don see your payment and I don send your crypto sharp sharp. 🚀 Thank you for trading with us, boss!",
+        "E don set! ✅ *Order #{tx_id} Completed.* \n\nYour Naira don land and I don fire the USDT go your wallet. 💎 Thanks for the patronage!",
+        "Confirmed! 🎯 *Order #{tx_id} Success.* \n\nPayment verified and crypto sent. No wahala. Always here for you! 🤝",
+        "✅ *Order #{tx_id}* don clear. \n\nI don deposit the currency for you. Thanks for using our P2P service! 🚀",
+        "Sharp sharp! ✅ *Order #{tx_id}* finished. \n\nYour trade don verify and I don send the crypto. We move! 📈",
+        "Done deal! 🤝 *Order #{tx_id}* complete. \n\nI don see the money and I don credit you. God bless your hustle! 💰",
+        "✅ *Order #{tx_id}* verified. \n\nEverything set, crypto don land your wallet. Thanks for trading with the plug! 💎",
+        "Confirmed boss! ✅ *Order #{tx_id}* is complete. \n\nI don see the alert and I don send the USDT. Catch you next time! 🚀",
+        "✅ *Order #{tx_id}* successful. \n\nCurrency don dey your side now. Thanks for trusting us! 🤝",
+        "All set! ✅ *Order #{tx_id}* finished. \n\nPayment confirmed, crypto sent. Sharp sharp delivery! ⚡"
+    ],
+    "ADMIN_REJECT_USER": [
+        "❌ *Order #{tx_id}* \n\nHow far boss, I never see the money for my side o. Abeg check your bank or send the proof again make I see.",
+        "Wait small... ❌ *Order #{tx_id}* \n\nI never get alert for this payment yet. Abeg re-verify say you send am correctly.",
+        "❌ *Order #{tx_id} Issue* \n\nMoney never show for ground o. I dey wait make the alert enter. Abeg check am.",
+        "Hmm, ❌ *Order #{tx_id}* \n\nAlert never land. Be like say delay dey or something wrong. Check your app well.",
+        "❌ *Order #{tx_id}* \n\nBoss, I never see this one o. Abeg verify the transfer well before you send proof again.",
+        "Issue with *Order #{tx_id}* ❌ \n\nPayment never reflect for my side. Abeg double check the details you use pay.",
+        "❌ *Order #{tx_id}* \n\nI never see money yet. Maybe network delay, but I still dey wait. Check your side too.",
+        "🛑 *Order #{tx_id}* \n\nAlert never show face. Abeg make you check the transaction status for your bank app.",
+        "❌ *Order #{tx_id} Rejected* \n\nI never see the credit for my bank. Abeg contact support or check if transfer fail.",
+        "Wait o! ❌ *Order #{tx_id}* \n\nMoney never enter. Abeg verify and try again later if e be network issue. 🛑"
     ]
 }
 
