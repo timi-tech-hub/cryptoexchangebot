@@ -1,45 +1,17 @@
 """
-CryptoSwap Telegram Bot - USDT/Naira Exchange Bot
-Allows users to buy/sell USDT for Naira, manage balances, and withdraw funds.
+Main entry point for the Nigerian P2P Crypto Exchange Telegram Bot.
+Orchestrates conversation flows, admin fulfillment, and background reminder tasks.
 """
 
 import asyncio
 import logging
-import sqlite3
-import requests
 import re
 import sys
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime
-
-# Setup logging IMMEDIATELY
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-# ============================================================================
-# DUMMY SERVER FOR RENDER HEALTH CHECKS
-# ============================================================================
-
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
-        self.end_headers()
-        self.wfile.write(b"Bot is running!")
-
-    def log_message(self, format, *args):
-        return # Silence logs to keep Render logs clean
-
-def run_dummy_server():
-    port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
-    logger.info(f"🌐 Dummy health-check server started on port {port}")
-    server.serve_forever()
+from typing import NoReturn, Optional, Dict, Any
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from telegram.ext import (
@@ -48,49 +20,84 @@ from telegram.ext import (
 )
 from telegram.error import TelegramError
 
-from config import BOT_TOKEN, ADMIN_IDS, YOUR_BANK_NAME, YOUR_BANK_ACCOUNT, YOUR_BANK_ACCOUNT_NAME, YOUR_USDT_WALLET
+# Local module imports
+from config import (
+    BOT_TOKEN, ADMIN_IDS, YOUR_BANK_NAME, YOUR_BANK_ACCOUNT, 
+    YOUR_BANK_ACCOUNT_NAME, YOUR_USDT_WALLET
+)
 from database import (
     init_db, get_user, register_user, update_balance, add_transaction,
     update_transaction_status, get_setting, set_setting, get_user_transactions,
     get_transaction, get_all_users, auto_create_user
 )
-from tron_utils import monitor_incoming_usdt, verify_transaction, get_usdt_balance, verify_usdt_deposit, send_usdt
+from utils.tron_utils import (
+    monitor_incoming_usdt, verify_transaction, get_usdt_balance, 
+    verify_usdt_deposit, send_usdt
+)
 from responses import get_text
 
-# Conversation states
+# Setup logging with a professional format
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# --- Conversation State Constants ---
 (
     BUY_AMOUNT, BUY_WALLET, BUY_CONFIRM_WALLET, BUY_PAYMENT_PROOF,
     SELL_AMOUNT, SELL_BANK_DETAILS, SELL_CONFIRM_ACC, SELL_TX_HASH
 ) = range(8)
 
 # ============================================================================
-# HELPER FUNCTIONS
+# INFRASTRUCTURE: HEALTH CHECK SERVER
+# ============================================================================
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    """Minimal HTTP handler to satisfy Render's port binding requirement."""
+    def do_GET(self) -> None:
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b"Bot Service Active")
+
+    def log_message(self, format: str, *args: Any) -> None:
+        return # Silence server logs for clarity
+
+def run_dummy_server() -> None:
+    """Starts a background HTTP server for health checks."""
+    port = int(os.environ.get("PORT", 8080))
+    try:
+        server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+        logger.info(f"🌐 Infrastructure: Health-check server active on port {port}")
+        server.serve_forever()
+    except Exception as e:
+        logger.error(f"❌ Infrastructure: Failed to start health-check server: {e}")
+
+# ============================================================================
+# SECURITY & HELPERS
 # ============================================================================
 
 def is_admin(user_id: int) -> bool:
-    """Check if user is an admin"""
+    """Validates if a user has administrative privileges."""
     return user_id in ADMIN_IDS
 
 # ============================================================================
-# COMMAND HANDLERS
+# INTERFACE: CORE COMMANDS
 # ============================================================================
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command"""
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Initializes the user profile and displays the welcome interface."""
     user_id = update.effective_user.id
     auto_create_user(user_id)
     await update.message.reply_text(get_text("WELCOME"), parse_mode="Markdown")
 
-async def handle_general_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle general text messages like 'hi'"""
+async def handle_general_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Redirects unrecognized text to the start menu."""
     await start(update, context)
 
-# ============================================================================
-# RATES
-# ============================================================================
-
-async def rates(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show current exchange rates"""
+async def rates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays current USDT/NGN exchange rates fetched from settings."""
     buy_rate = int(get_setting('buy_rate') or 1480)
     sell_rate = int(get_setting('sell_rate') or 1520)
     
@@ -104,16 +111,16 @@ async def rates(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 # ============================================================================
-# BUY FLOW (User buys USDT from me)
+# FLOW: BUY USDT (Naira to Crypto)
 # ============================================================================
 
-async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start buy flow"""
+async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Entry point for the USDT purchase conversation."""
     await update.message.reply_text(get_text("BUY_START"), parse_mode="Markdown")
     return BUY_AMOUNT
 
-async def buy_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle buy amount"""
+async def buy_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Validates and records the requested purchase amount."""
     try:
         amount = float(update.message.text)
         if amount <= 0: raise ValueError
@@ -125,8 +132,8 @@ async def buy_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_text("BUY_AMOUNT_SUCCESS", amount=amount), parse_mode="Markdown")
     return BUY_WALLET
 
-async def buy_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle buy wallet address"""
+async def buy_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Collects and performs initial validation on the user's TRC20 wallet."""
     wallet = update.message.text.strip()
     if not (wallet.startswith('T') and len(wallet) == 34):
         await update.message.reply_text(get_text("BUY_WALLET_INVALID"), parse_mode="Markdown")
@@ -136,8 +143,8 @@ async def buy_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_text("BUY_WALLET_DOUBLE_CHECK"), parse_mode="Markdown")
     return BUY_CONFIRM_WALLET
 
-async def buy_confirm_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle buy wallet confirmation"""
+async def buy_confirm_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Performs the secondary confirmation (double-entry) for the wallet address."""
     wallet_confirm = update.message.text.strip()
     if wallet_confirm != context.user_data['buy_wallet']:
         await update.message.reply_text(get_text("WALLET_MISMATCH"), parse_mode="Markdown")
@@ -159,15 +166,15 @@ async def buy_confirm_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
     return BUY_PAYMENT_PROOF
 
-async def buy_payment_proof(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle buy payment proof and notify admin"""
+async def buy_payment_proof(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Processes payment proof and notifies administrators for manual verification."""
     sell_rate = int(get_setting('sell_rate') or 1520)
     amount = context.user_data['buy_amount']
     wallet = context.user_data['buy_wallet']
     naira = amount * sell_rate
     user_id = update.effective_user.id
     
-    # Create transaction record
+    # Record transaction intent
     tx_id = add_transaction(
         user_id=user_id,
         tx_type='buy',
@@ -175,46 +182,48 @@ async def buy_payment_proof(update: Update, context: ContextTypes.DEFAULT_TYPE):
         amount=amount,
         rate=sell_rate,
         status='pending',
-        details=f"Wallet: {wallet}"
+        details=f"Recipient Wallet: {wallet}"
     )
     
     admin_msg = (
-        f"🚨 *NEW BUY ORDER #{tx_id}*\n\n"
-        f"User: `{user_id}`\n"
-        f"Buy Amount: {amount} USDT\n"
-        f"Pay Amount: ₦{naira:,.2f}\n"
-        f"🎯 *Recipient Wallet:* `{wallet}`"
+        f"🚨 *TRADE: BUY ORDER #{tx_id}*\n\n"
+        f"Client ID: `{user_id}`\n"
+        f"Requested: {amount} USDT\n"
+        f"Expected: ₦{naira:,.2f}\n"
+        f"🎯 *Target Wallet:* `{wallet}`"
     )
     
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ Approved (I Sent Crypto)", callback_data=f"admin_approve_{tx_id}"),
-            InlineKeyboardButton("❌ Reject", callback_data=f"admin_reject_{tx_id}")
+            InlineKeyboardButton("✅ Approved (Credit User)", callback_data=f"admin_approve_{tx_id}"),
+            InlineKeyboardButton("❌ Reject (Wait)", callback_data=f"admin_reject_{tx_id}")
         ]
     ])
     
+    # Forward proof to the first configured admin
     if update.message.photo:
         await context.bot.send_photo(chat_id=ADMIN_IDS[0], photo=update.message.photo[-1].file_id, caption=admin_msg, parse_mode="Markdown", reply_markup=keyboard)
     elif update.message.document:
         await context.bot.send_document(chat_id=ADMIN_IDS[0], document=update.message.document.file_id, caption=admin_msg, parse_mode="Markdown", reply_markup=keyboard)
     else:
-        await context.bot.send_message(chat_id=ADMIN_IDS[0], text=admin_msg + f"\n\nNote: {update.message.text}", parse_mode="Markdown", reply_markup=keyboard)
+        note = update.message.text or "No text provided"
+        await context.bot.send_message(chat_id=ADMIN_IDS[0], text=f"{admin_msg}\n\nNote: {note}", parse_mode="Markdown", reply_markup=keyboard)
         
     await update.message.reply_text(get_text("BUY_ORDER_COMPLETE", tx_id=tx_id), parse_mode="Markdown")
     context.user_data.clear()
     return ConversationHandler.END
 
 # ============================================================================
-# SELL FLOW (User sells USDT to me)
+# FLOW: SELL USDT (Crypto to Naira)
 # ============================================================================
 
-async def sell_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start sell flow"""
+async def sell_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Entry point for the USDT sale conversation."""
     await update.message.reply_text(get_text("SELL_START"), parse_mode="Markdown")
     return SELL_AMOUNT
 
-async def sell_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle sell amount"""
+async def sell_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Validates and records the USDT amount the user wishes to sell."""
     try:
         amount = float(update.message.text)
         if amount <= 0: raise ValueError
@@ -226,22 +235,22 @@ async def sell_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_text("SELL_AMOUNT_SUCCESS", amount=amount), parse_mode="Markdown")
     return SELL_BANK_DETAILS
 
-async def sell_bank_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle sell bank details"""
+async def sell_bank_details(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Collects target bank account details for Naira settlement."""
     details = update.message.text.strip()
-    import re
-    acc_num = re.search(r'\d{10}', details)
-    if not acc_num:
+    acc_num_match = re.search(r'\d{10}', details)
+    
+    if not acc_num_match:
         await update.message.reply_text(get_text("SELL_BANK_INVALID"), parse_mode="Markdown")
         return SELL_BANK_DETAILS
     
     context.user_data['sell_bank'] = details
-    context.user_data['sell_acc_num'] = acc_num.group(0)
+    context.user_data['sell_acc_num'] = acc_num_match.group(0)
     await update.message.reply_text(get_text("SELL_BANK_DOUBLE_CHECK"), parse_mode="Markdown")
     return SELL_CONFIRM_ACC
 
-async def sell_confirm_acc(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle sell account confirmation"""
+async def sell_confirm_acc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Performs the secondary confirmation (double-entry) for the bank account number."""
     acc_confirm = update.message.text.strip()
     if acc_confirm != context.user_data['sell_acc_num']:
         await update.message.reply_text(get_text("ACC_MISMATCH"), parse_mode="Markdown")
@@ -260,8 +269,8 @@ async def sell_confirm_acc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return SELL_TX_HASH
 
-async def sell_tx_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle sell TX hash and notify admin"""
+async def sell_tx_hash(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Records the blockchain TXID and alerts administrators for payment processing."""
     tx_hash = update.message.text.strip()
     buy_rate = int(get_setting('buy_rate') or 1480)
     amount = context.user_data['sell_amount']
@@ -269,7 +278,7 @@ async def sell_tx_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     naira = amount * buy_rate
     user_id = update.effective_user.id
     
-    # Create transaction record
+    # Record transaction intent
     tx_id = add_transaction(
         user_id=user_id,
         tx_type='sell',
@@ -278,22 +287,22 @@ async def sell_tx_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rate=buy_rate,
         status='pending',
         tx_hash=tx_hash,
-        details=f"Bank: {bank_details}"
+        details=f"Bank Settlement: {bank_details}"
     )
     
     admin_msg = (
-        f"🚨 *NEW SELL ORDER #{tx_id}*\n\n"
-        f"User: `{user_id}`\n"
-        f"Sell Amount: {amount} USDT\n"
-        f"Pay Amount: ₦{naira:,.2f}\n"
-        f"🏦 *Bank Details:* {bank_details}\n"
-        f"🔗 *TXID:* `{tx_hash}`"
+        f"🚨 *TRADE: SELL ORDER #{tx_id}*\n\n"
+        f"Client ID: `{user_id}`\n"
+        f"Selling: {amount} USDT\n"
+        f"Payable: ₦{naira:,.2f}\n"
+        f"🏦 *Target Bank:* {bank_details}\n"
+        f"🔗 *Hash:* `{tx_hash}`"
     )
     
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ Approved (I Paid User)", callback_data=f"admin_approve_{tx_id}"),
-            InlineKeyboardButton("❌ Reject", callback_data=f"admin_reject_{tx_id}")
+            InlineKeyboardButton("✅ Approved (Paid)", callback_data=f"admin_approve_{tx_id}"),
+            InlineKeyboardButton("❌ Reject (Wait)", callback_data=f"admin_reject_{tx_id}")
         ]
     ])
     
@@ -302,264 +311,189 @@ async def sell_tx_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-async def cancel_trade(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cancel current conversation"""
+async def cancel_trade(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Gracefully terminates an active conversation."""
     await update.message.reply_text(get_text("CANCEL_TRADE"), parse_mode="Markdown")
     context.user_data.clear()
     return ConversationHandler.END
 
 # ============================================================================
-# ADMIN HANDLER
+# ADMINISTRATION: FULFILLMENT & MANAGEMENT
 # ============================================================================
 
-async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle admin approval/rejection callbacks"""
+async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Manages trade approval and rejection logic with state protection (idempotency)."""
     query = update.callback_query
     await query.answer()
     
-    user_id = query.from_user.id
-    if not is_admin(user_id):
-        await query.answer("❌ Unauthorized.", show_alert=True)
+    if not is_admin(query.from_user.id):
+        await query.answer("Security Error: Unauthorized access attempt.", show_alert=True)
         return
         
-    data = query.data
-    parts = data.split('_')
-    action = parts[1]
-    tx_id = int(parts[2])
+    parts = query.data.split('_')
+    action, tx_id = parts[1], int(parts[2])
     
     tx = get_transaction(tx_id)
     if not tx:
-        await query.edit_message_text("❌ Transaction not found.")
+        await query.edit_message_text("Data Integrity Error: Transaction record not found.")
         return
         
-    # If already completed, ignore everything to avoid multiple messages
+    # State Guard: Prevent modifications to already finalized trades
     if tx['status'] == 'completed':
-        await query.answer("This order is already COMPLETED.", show_alert=True)
+        await query.answer("Notice: This order has already been finalized.", show_alert=True)
         return
         
     tx_user_id = tx['user_id']
     
     if action == 'approve':
-        # Mark as completed in DB
         update_transaction_status(tx_id, 'completed')
+        # Finalize Admin UI (Strip buttons to prevent re-clicks)
+        await query.edit_message_text(f"✅ Order #{tx_id} finalized and marked as COMPLETED.")
         
-        # Update admin message (REMOVE BUTTONS)
-        await query.edit_message_text(f"✅ Order #{tx_id} marked as COMPLETED.")
-        
-        # Notify user with approval message (Pidgin)
         try:
             await context.bot.send_message(
                 chat_id=tx_user_id,
                 text=get_text("ADMIN_APPROVE_USER", tx_id=tx_id),
                 parse_mode="Markdown"
             )
-        except Exception:
-            pass
+        except TelegramError as e:
+            logger.error(f"Notification failure for user {tx_user_id}: {e}")
             
     elif action == 'reject':
-        # If already rejected, ignore to avoid multiple messages
         if tx['status'] == 'failed':
-            await query.answer("This order is already REJECTED.", show_alert=True)
+            await query.answer("Notice: Order is already in a rejected state.", show_alert=True)
             return
             
-        # Mark as failed in DB
         update_transaction_status(tx_id, 'failed')
-        
-        # Update admin message (KEEP APPROVE BUTTON in case money shows up later)
+        # Allow re-approval if rejection was premature
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Approved (Money don show)", callback_data=f"admin_approve_{tx_id}")]
+            [InlineKeyboardButton("✅ Re-approve (Funds Received)", callback_data=f"admin_approve_{tx_id}")]
         ])
         await query.edit_message_text(
-            f"❌ Order #{tx_id} REJECTED (Money never show).\n\nYou can still Approve if it enters later.",
+            f"❌ Order #{tx_id} REJECTED (Pending funds).\n\nYou may still approve this trade if funds reflect later.",
             reply_markup=keyboard
         )
         
-        # Notify user with rejection message (Pidgin)
         try:
             await context.bot.send_message(
                 chat_id=tx_user_id,
                 text=get_text("ADMIN_REJECT_USER", tx_id=tx_id),
                 parse_mode="Markdown"
             )
-        except Exception:
-            pass
+        except TelegramError as e:
+            logger.error(f"Notification failure for user {tx_user_id}: {e}")
 
-# ============================================================================
-# HISTORY & SUPPORT
-# ============================================================================
-
-async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show transaction history"""
+async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays the authenticated user's recent transaction ledger."""
     txs = get_user_transactions(update.effective_user.id, limit=10)
     if not txs:
         await update.message.reply_text(get_text("HISTORY_EMPTY"), parse_mode="Markdown")
         return
     
-    msg = "📊 *Last 10 Transactions*\n\n"
+    msg = "📊 *Recent P2P Activity*\n\n"
     for tx in txs:
-        status_emoji = "✅" if tx['status'] == "completed" else "⏳" if tx['status'] == "pending" else "❌"
-        msg += f"{status_emoji} {tx['type'].upper()} | {tx['amount']:.2f} {tx['amount_currency']} @ ₦{tx['rate']} | {tx['created_at'][:10]}\n"
+        status_icon = "✅" if tx['status'] == "completed" else "⏳" if tx['status'] == "pending" else "❌"
+        date_str = tx['created_at'][:10]
+        msg += f"{status_icon} {tx['type'].upper()} | {tx['amount']:.2f} {tx['amount_currency']} | {date_str}\n"
     
     await update.message.reply_text(msg, parse_mode="Markdown")
 
-async def support(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Support/contact info"""
+async def support(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Provides human-intervention contact details."""
     admin_id = ADMIN_IDS[0]
     await update.message.reply_text(get_text("SUPPORT", admin_id=admin_id), parse_mode="Markdown")
 
-# ============================================================================
-# ADMIN COMMANDS
-# ============================================================================
-
-async def setrate(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Set exchange rates (admin only)"""
+async def setrate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Administrator command to adjust real-time exchange rates."""
     if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Unauthorized.")
+        await update.message.reply_text("Permission Denied.")
         return
     
     args = context.args
     if len(args) != 2:
-        await update.message.reply_text(
-            "Usage: `/setrate <buy_rate> <sell_rate>`\n"
-            "Example: `/setrate 1480 1520`",
-            parse_mode="Markdown"
-        )
+        await update.message.reply_text("Usage: `/setrate <buy_price> <sell_price>`")
         return
     
     try:
-        buy_rate = int(args[0])
-        sell_rate = int(args[1])
+        buy_rate, sell_rate = int(args[0]), int(args[1])
+        if sell_rate <= buy_rate:
+            await update.message.reply_text("Market Rule Error: Sell rate must exceed buy rate.")
+            return
+            
+        set_setting('buy_rate', str(buy_rate))
+        set_setting('sell_rate', str(sell_rate))
+        await update.message.reply_text(f"✅ Rates Synchronized:\n📈 Buy: ₦{buy_rate}\n📉 Sell: ₦{sell_rate}")
     except ValueError:
-        await update.message.reply_text("❌ Rates must be integers.")
-        return
-    
-    if sell_rate <= buy_rate:
-        await update.message.reply_text("❌ Sell rate must be higher than buy rate.")
-        return
-    
-    set_setting('buy_rate', str(buy_rate))
-    set_setting('sell_rate', str(sell_rate))
-    
-    await update.message.reply_text(
-        f"✅ Rates updated:\n\n"
-        f"📈 I Buy: ₦{buy_rate}/USDT\n"
-        f"📉 I Sell: ₦{sell_rate}/USDT\n"
-        f"Spread: ₦{sell_rate - buy_rate}",
-        parse_mode="Markdown"
-    )
+        await update.message.reply_text("Input Error: Rates must be valid integers.")
 
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Broadcast message to all users (admin only)"""
-    if not is_admin(update.effective_user.id):
-        return
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Administrator command to dispatch a system-wide announcement."""
+    if not is_admin(update.effective_user.id): return
     
     message = ' '.join(context.args)
-    if not message:
-        await update.message.reply_text("Usage: `/broadcast <message>`", parse_mode="Markdown")
-        return
+    if not message: return
     
     users = get_all_users()
-    sent = 0
-    failed = 0
+    sent_count, failed_count = 0, 0
     
     for user_id in users:
         try:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=f"📢 *Announcement*\n\n{message}",
-                parse_mode="Markdown"
-            )
-            sent += 1
-            await asyncio.sleep(0.05)
+            await context.bot.send_message(chat_id=user_id, text=f"📢 *Announcement*\n\n{message}", parse_mode="Markdown")
+            sent_count += 1
+            await asyncio.sleep(0.05) # Prevent Telegram Rate Limiting
         except TelegramError:
-            failed += 1
+            failed_count += 1
     
-    await update.message.reply_text(
-        f"✅ Broadcast complete.\n"
-        f"Sent: {sent} | Failed: {failed}",
-        parse_mode="Markdown"
-    )
+    await update.message.reply_text(f"✅ Broadcast Status: {sent_count} Delivered | {failed_count} Blocked")
 
 # ============================================================================
-# PERIODIC REMINDERS
+# AUTOMATION: PERIODIC SCHEDULING
 # ============================================================================
 
-async def send_reminder_broadcast(context: ContextTypes.DEFAULT_TYPE):
-    """Send a reminder message to all users"""
-    users = get_all_users()
-    sent = 0
-    for user_id in users:
-        try:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=get_text("REMINDER"),
-                parse_mode="Markdown"
-            )
-            sent += 1
-            await asyncio.sleep(0.05)
-        except TelegramError:
-            pass
-    
-    logger.info(f"Periodic reminder sent to {sent} users.")
-    set_setting('last_reminder_date', datetime.now().strftime('%Y-%m-%d'))
-
-async def reminder_scheduler(app: Application):
-    """Background task to check if it is time for a reminder (every 90 days)"""
+async def reminder_scheduler(app: Application) -> NoReturn:
+    """Background loop ensuring consistent customer engagement (90-day intervals)."""
     while True:
         last_date_str = get_setting('last_reminder_date')
-        should_send = False
-        
         if not last_date_str:
             set_setting('last_reminder_date', datetime.now().strftime('%Y-%m-%d'))
         else:
             last_date = datetime.strptime(last_date_str, '%Y-%m-%d')
-            days_passed = (datetime.now() - last_date).days
-            if days_passed >= 90:
-                should_send = True
+            if (datetime.now() - last_date).days >= 90:
+                logger.info("Automation: Dispatching periodic engagement reminder...")
+                for user_id in get_all_users():
+                    try:
+                        await app.bot.send_message(chat_id=user_id, text=get_text("REMINDER"), parse_mode="Markdown")
+                        await asyncio.sleep(0.05)
+                    except Exception: continue
+                set_setting('last_reminder_date', datetime.now().strftime('%Y-%m-%d'))
         
-        if should_send:
-            logger.info("Triggering 3-month periodic reminder...")
-            users = get_all_users()
-            for user_id in users:
-                try:
-                    await app.bot.send_message(chat_id=user_id, text=get_text("REMINDER"), parse_mode="Markdown")
-                    await asyncio.sleep(0.05)
-                except Exception:
-                    continue
-            
-            set_setting('last_reminder_date', datetime.now().strftime('%Y-%m-%d'))
-        
-        await asyncio.sleep(86400)
+        await asyncio.sleep(86400) # Re-check daily
 
 # ============================================================================
-# ERROR HANDLER
+# CORE: INITIALIZATION & RUNTIME
 # ============================================================================
 
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle errors"""
-    logger.error(f"Update {update} caused error {context.error}")
-
-# ============================================================================
-# MAIN
-# ============================================================================
-
-async def post_init(app: Application):
-    """Start background tasks after bot is initialized"""
+async def post_init(app: Application) -> None:
+    """Handles service startup procedures after bot initialization."""
     asyncio.create_task(reminder_scheduler(app))
 
-def main():
-    """Start the bot"""
-    # Start dummy health-check server for Render
+async def error_handler(update: Optional[Update], context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Centralized exception handling for the bot runtime."""
+    logger.error(f"Runtime Error: Update {update} triggered {context.error}")
+
+def main() -> None:
+    """Orchestrates the bot service lifecycle."""
+    # Start Infrastructure Health-Check
     threading.Thread(target=run_dummy_server, daemon=True).start()
     
+    # Initialize Core Application
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     
-    # Conversation Handlers for Buy and Sell
+    # --- Registered Logic Handlers ---
+    
+    # Transactional Conversations
     buy_conv = ConversationHandler(
-        entry_points=[
-            CommandHandler("buy", buy_start),
-            MessageHandler(filters.Regex(r'(?i)^buy'), buy_start)
-        ],
+        entry_points=[CommandHandler("buy", buy_start), MessageHandler(filters.Regex(r'(?i)^buy'), buy_start)],
         states={
             BUY_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, buy_amount)],
             BUY_WALLET: [MessageHandler(filters.TEXT & ~filters.COMMAND, buy_wallet)],
@@ -570,10 +504,7 @@ def main():
     )
     
     sell_conv = ConversationHandler(
-        entry_points=[
-            CommandHandler("sell", sell_start),
-            MessageHandler(filters.Regex(r'(?i)^sell'), sell_start)
-        ],
+        entry_points=[CommandHandler("sell", sell_start), MessageHandler(filters.Regex(r'(?i)^sell'), sell_start)],
         states={
             SELL_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, sell_amount)],
             SELL_BANK_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, sell_bank_details)],
@@ -583,40 +514,34 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel_trade), MessageHandler(filters.Regex(r'(?i)^cancel'), cancel_trade)],
     )
     
-    # Register handlers
     app.add_handler(buy_conv)
     app.add_handler(sell_conv)
     
+    # Command & UI Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("rates", rates))
     app.add_handler(MessageHandler(filters.Regex(r'(?i)^(rate|price)'), rates))
-    
     app.add_handler(CommandHandler("history", history))
     app.add_handler(MessageHandler(filters.Regex(r'(?i)^(history|order|transaction)'), history))
-    
     app.add_handler(CommandHandler("support", support))
     app.add_handler(MessageHandler(filters.Regex(r'(?i)^(support|help|admin)'), support))
     
-    # Admin commands
+    # Admin Control Panel
     app.add_handler(CommandHandler("setrate", setrate))
     app.add_handler(CommandHandler("broadcast", broadcast))
-    
-    # Callbacks
     app.add_handler(CallbackQueryHandler(handle_admin_callback, pattern="^admin_"))
     
-    # General text handler
+    # Catch-all & Infrastructure
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_general_text))
-    
-    # Error handler
     app.add_error_handler(error_handler)
     
-    logger.info("🤖 P2P Crypto Exchange Bot started...")
+    # Persistent Start
+    logger.info("🤖 Runtime: Nigerian P2P Crypto Exchange Bot initialized.")
     app.run_polling()
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        logger.error(f"❌ CRITICAL BOT CRASH: {e}", exc_info=True)
-        import sys
+        logger.critical(f"🛑 CRITICAL SYSTEM FAILURE: {e}", exc_info=True)
         sys.exit(1)
