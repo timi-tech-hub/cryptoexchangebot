@@ -9,6 +9,9 @@ import sqlite3
 import requests
 import re
 import sys
+import os
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime
 
 # Setup logging IMMEDIATELY
@@ -17,6 +20,26 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# DUMMY SERVER FOR RENDER HEALTH CHECKS
+# ============================================================================
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b"Bot is running!")
+
+    def log_message(self, format, *args):
+        return # Silence logs to keep Render logs clean
+
+def run_dummy_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    logger.info(f"🌐 Dummy health-check server started on port {port}")
+    server.serve_forever()
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from telegram.ext import (
@@ -508,6 +531,9 @@ async def post_init(app: Application):
 
 def main():
     """Start the bot"""
+    # Start dummy health-check server for Render
+    threading.Thread(target=run_dummy_server, daemon=True).start()
+    
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     
     # Conversation Handlers for Buy and Sell
