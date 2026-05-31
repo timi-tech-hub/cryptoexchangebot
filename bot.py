@@ -483,6 +483,9 @@ async def error_handler(update: Optional[Update], context: ContextTypes.DEFAULT_
 
 def main() -> None:
     """Orchestrates the bot service lifecycle."""
+    # Initialize Database
+    init_db()
+    
     # Start Infrastructure Health-Check
     threading.Thread(target=run_dummy_server, daemon=True).start()
     
@@ -537,6 +540,15 @@ def main() -> None:
     
     # Persistent Start
     logger.info("🤖 Runtime: Nigerian P2P Crypto Exchange Bot initialized.")
+    
+    # Fix for "RuntimeError: There is no current event loop in thread 'MainThread'"
+    import asyncio
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
     app.run_polling()
 
 if __name__ == "__main__":
